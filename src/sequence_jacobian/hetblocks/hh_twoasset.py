@@ -6,6 +6,8 @@ from .. import interpolate
 
 
 def hh_init(b_grid, a_grid, z_grid, eis):
+    
+    print("step 1")
     Va = (0.6 + 1.1 * b_grid[:, np.newaxis] + a_grid) ** (-1 / eis) * np.ones((z_grid.shape[0], 1, 1))
     Vb = (0.5 + b_grid[:, np.newaxis] + 1.2 * a_grid) ** (-1 / eis) * np.ones((z_grid.shape[0], 1, 1))
     return Va, Vb
@@ -30,7 +32,7 @@ def marginal_cost_grid(a_grid, ra, chi0, chi1, chi2):
 def hh(Va_p, Vb_p, a_grid, b_grid, z_grid, e_grid, k_grid, beta, eis, rb, ra, chi0, chi1, chi2, Psi1):
     # === STEP 2: Wb(z, b', a') and Wa(z, b', a') ===
     # (take discounted expectation of tomorrow's value function)
-    
+    print("step 2")
     if (ra > rb) and not (Va_p > Vb_p):
         print(f"r_a > r_b but not Va_p > Vb_p")
     # ADDITION
@@ -46,6 +48,7 @@ def hh(Va_p, Vb_p, a_grid, b_grid, z_grid, e_grid, k_grid, beta, eis, rb, ra, ch
 
     # === STEP 3: a'(z, b', a) for UNCONSTRAINED ===
 
+    print("step 3")
     # for each (z, b', a), linearly interpolate to find a' between gridpoints
     # satisfying optimality condition W_ratio == 1+Psi1
     i, pi = lhs_equals_rhs_interpolate(W_ratio, 1 + Psi1)
@@ -58,7 +61,7 @@ def hh(Va_p, Vb_p, a_grid, b_grid, z_grid, e_grid, k_grid, beta, eis, rb, ra, ch
     c_endo_unc = interpolate.apply_coord(i, pi, Wb) ** (-eis)
 
     # === STEP 4: b'(z, b, a), a'(z, b, a) for UNCONSTRAINED ===
-
+    print("step 4")
     # solve out budget constraint to get b(z, b', a)
     b_endo = (c_endo_unc + a_endo_unc + addouter(-z_grid, b_grid, -(1 + ra) * a_grid)
               + get_Psi_and_deriv(a_endo_unc, a_grid, ra, chi0, chi1, chi2)[0]) / (1 + rb)
@@ -73,10 +76,15 @@ def hh(Va_p, Vb_p, a_grid, b_grid, z_grid, e_grid, k_grid, beta, eis, rb, ra, ch
 
     # === STEP 5: a'(z, kappa, a) for CONSTRAINED ===
 
+    print("step 5")
     # for each (z, kappa, a), linearly interpolate to find a' between gridpoints
     # satisfying optimality condition W_ratio/(1+kappa) == 1+Psi1, assuming b'=0
     lhs_con = W_ratio[:, 0:1, :] / (1 + k_grid[np.newaxis, :, np.newaxis])
     i, pi = lhs_equals_rhs_interpolate(lhs_con, 1 + Psi1)
+    
+    print(f"w_ratio: {W_ratio[:, 0:1, :]}")
+    print(f"lhs_con: {lhs_con}")
+    print(f"(i, pi): {i, pi}")
 
     # use same interpolation to get Wb and then c
     a_endo_con = interpolate.apply_coord(i, pi, a_grid)
