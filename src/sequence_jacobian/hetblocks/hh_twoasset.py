@@ -20,6 +20,7 @@ def marginal_cost_grid(a_grid, ra, chi0, chi1, chi2):
     # precompute Psi1(a', a) on grid of (a', a) for steps 3 and 5
     Psi1 = get_Psi_and_deriv(a_grid[:, np.newaxis],
                              a_grid[np.newaxis, :], ra, chi0, chi1, chi2)[1]
+
     return Psi1
 
 
@@ -29,15 +30,28 @@ def marginal_cost_grid(a_grid, ra, chi0, chi1, chi2):
 def hh(Va_p, Vb_p, a_grid, b_grid, z_grid, e_grid, k_grid, beta, eis, rb, ra, chi0, chi1, chi2, Psi1):
     # === STEP 2: Wb(z, b', a') and Wa(z, b', a') ===
     # (take discounted expectation of tomorrow's value function)
+    
+    if (ra > rb) and not (Va_p > Vb_p):
+        print(f"r_a > r_b but not Va_p > Vb_p")
+    # ADDITION
+    print("# ------------------------------------------------------------ #")
+    
     Wb = beta * Vb_p
+    
     Wa = beta * Va_p
     W_ratio = Wa / Wb
+    
+    # ADDITION
+    print(f"W_ratio starting guess: {W_ratio}")
 
     # === STEP 3: a'(z, b', a) for UNCONSTRAINED ===
 
     # for each (z, b', a), linearly interpolate to find a' between gridpoints
     # satisfying optimality condition W_ratio == 1+Psi1
     i, pi = lhs_equals_rhs_interpolate(W_ratio, 1 + Psi1)
+    
+    # ADDITION
+    print(f"(i, pi): {(i, pi)}")
 
     # use same interpolation to get Wb and then c
     a_endo_unc = interpolate.apply_coord(i, pi, a_grid)
@@ -102,6 +116,9 @@ def hh(Va_p, Vb_p, a_grid, b_grid, z_grid, e_grid, k_grid, beta, eis, rb, ra, ch
     # update derivatives of value function using envelope conditions
     Va = (1 + ra - Psi2) * uc
     Vb = (1 + rb) * uc
+    
+    print("# ------------------------------------------------------------ #")
+
 
     return Va, Vb, a, b, c, uce
 
@@ -122,6 +139,12 @@ def get_Psi_and_deriv(ap, a, ra, chi0, chi1, chi2):
     Psi = chi1 / chi2 * abs_a_change * core_factor
     Psi1 = chi1 * sign_change * core_factor
     Psi2 = -(1 + ra) * (Psi1 + (chi2 - 1) * Psi / adj_denominator)
+    
+    if (chi1 == 0.0) and not (np.all(Psi1 == 0.0) and np.all(Psi2 == 0.0)):
+        print(f"sum of psi1: {np.sum(Psi1)}")
+        print(f"sum of psi2: {np.sum(Psi2)}")
+        raise ValueError("chi1 was 0.0 but not all Psi1 or Psi2 were 0.0")
+
     return Psi, Psi1, Psi2
 
 
