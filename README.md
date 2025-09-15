@@ -1,3 +1,5 @@
+# forked for debugging and adjusting interpolation functions
+
 # Sequence-Space Jacobian (SSJ)
 
 [![CI](https://github.com/shade-econ/sequence-jacobian/actions/workflows/main.yml/badge.svg)](https://github.com/shade-econ/sequence-jacobian/actions/workflows/main.yml)
