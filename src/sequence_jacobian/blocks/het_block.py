@@ -188,8 +188,8 @@ class HetBlock(Block):
                 del ss[k]
 
             ss.update(self.backward_fun(ss))
-
-            if it % 10 == 1 and all(utils.optimized_routines.within_tolerance(ss[k], old[k], tol)
+            if it % 10 == 1 and all(
+                utils.optimized_routines.within_tolerance(ss[k], old[k], tol)
                                     for k in self.policy):
                 break
 
@@ -239,6 +239,7 @@ class HetBlock(Block):
 
         # "D" is after the exogenous shock, Dbeg is before it
         return Dbeg, D
+
 
     '''Nonlinear impulse backward and forward methods'''
 

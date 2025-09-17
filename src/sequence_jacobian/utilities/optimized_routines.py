@@ -17,6 +17,18 @@ def setmin(x, xmin):
 
 
 @njit
+def within_tolerance_err(x1, x2, tol):
+    """Efficiently test max(abs(x1-x2)) <= tol for arrays of same dimensions x1, x2."""
+    y1 = x1.ravel()
+    y2 = x2.ravel()
+
+    for i in range(y1.shape[0]):
+        err = np.abs(y1[i] - y2[i])
+        if np.abs(y1[i] - y2[i]) > tol:
+            return False, err
+    return True, 0.0
+
+@njit
 def within_tolerance(x1, x2, tol):
     """Efficiently test max(abs(x1-x2)) <= tol for arrays of same dimensions x1, x2."""
     y1 = x1.ravel()
@@ -26,7 +38,6 @@ def within_tolerance(x1, x2, tol):
         if np.abs(y1[i] - y2[i]) > tol:
             return False
     return True
-
 
 @njit
 def fast_aggregate(X, Y):
