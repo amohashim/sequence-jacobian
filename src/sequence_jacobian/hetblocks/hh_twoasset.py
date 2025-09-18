@@ -7,6 +7,7 @@ from ..blocks.het_block import het
 from .. import interpolate
 
 # def hh_init(b_grid, a_grid, z_grid, eis):
+# def hh_init(b_grid, a_grid, z_grid, eis):
     
 #     print("step 1")
 #     Va = (0.6 + 1.1 * b_grid[:, np.newaxis] + a_grid) ** (-1 / eis) * np.ones((z_grid.shape[0], 1, 1))
@@ -208,8 +209,22 @@ def hh_print(Va_p, Vb_p, a_grid, b_grid, z_grid, e_grid, k_grid, beta, eis, rb, 
     # for each (z, b', a), linearly interpolate to find a' between gridpoints
     # satisfying optimality condition W_ratio == 1+Psi1
 
+
     i, pi = lhs_equals_rhs_interpolate(W_ratio, 1 + Psi1)
     
+    print(f"for (y,b) = (0,0), lhs = w_ratio[0,0,:]")
+    print(f"so lhs = {W_ratio[0,0,:]}")
+    print(f"and rhs = {1 + Psi1}")
+    
+    print(f"lhs - rhs[:,0]: {W_ratio[0,0,:] - (1 + Psi1[:,0])}")
+    
+    print(f"lhs - rhs[0,0]: {W_ratio[0,0,:] - (1 + Psi1[0,0])}")
+    print(f"lhs - rhs[1,0]: {W_ratio[0,0,:] - (1 + Psi1[1,0])}")
+    print(f"lhs - rhs[2,0]: {W_ratio[0,0,:] - (1 + Psi1[2,0])}")
+    
+    print(f"psi1[:,0] {Psi1[:,0]}")
+    print(f"i[0,:,1], pi[0,:,1]: {i[0,:,1], pi[0, :, 1]}")
+
     print(f"for (y,b) = (0,0), lhs = w_ratio[0,0,:]")
     print(f"so lhs = {W_ratio[0,0,:]}")
     print(f"and rhs = {1 + Psi1}")
@@ -333,6 +348,7 @@ def get_Psi_and_deriv(ap, a, ra, chi0, chi1, chi2):
     Psi2 = -(1 + ra) * (Psi1 + (chi2 - 1) * Psi / adj_denominator)
     
     if (chi1 == 0.0) and not (np.all(Psi1 == 0.0) and np.all(Psi2 == 0.0)):
+        print(Psi1)
         print(Psi1)
         print(f"sum of psi1: {np.sum(Psi1)}")
         print(f"sum of psi2: {np.sum(Psi2)}")

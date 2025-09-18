@@ -176,7 +176,7 @@ class HetBlock(Block):
 
     '''Steady-state backward and forward methods'''
 
-    def backward_steady_state(self, ss, tol=1E-8, maxit=5000):
+    def backward_steady_state(self, ss, tol=1E-8, maxit=100000):
         """Backward iteration to get steady-state policies and other outcomes"""
         ss = ss.copy()
         exog = self.make_exog_law_of_motion(ss)
