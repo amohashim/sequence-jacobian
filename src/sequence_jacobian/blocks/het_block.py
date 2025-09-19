@@ -1,6 +1,7 @@
 import copy
 import numpy as np
 from typing import Optional, Dict
+import warnings
 
 from .block import Block
 from .. import utilities as utils
@@ -8,7 +9,11 @@ from ..classes import SteadyStateDict, ImpulseDict, JacobianDict
 from ..utilities.function import ExtendedFunction, CombinedExtendedFunction
 from ..utilities.ordered_set import OrderedSet
 from ..utilities.bijection import Bijection
-from .support.het_support import ForwardShockableTransition, ExpectationShockableTransition, lottery_1d, lottery_2d, Markov, CombinedTransition, Transition
+from .support.het_support import \
+    ForwardShockableTransition, ExpectationShockableTransition, \
+        lottery_1d, lottery_2d, Markov, CombinedTransition, Transition
+from ..utilities.custom_warnings import \
+    PolicyConvergenceWarning, PolicyDiagnostics
 
 
 def het(exogenous, policy, backward, backward_init=None, hetinputs=None, hetoutputs=None):
@@ -85,7 +90,7 @@ class HetBlock(Block):
         else:
             return f"<HetBlock '{self.name}'>"
 
-    def _steady_state(self, calibration, backward_tol=1E-8, backward_maxit=5000,
+    def _steady_state(self, calibration, backward_tol=1E-8, backward_maxit=100_000,
                       forward_tol=1E-10, forward_maxit=100_000):
         ss = self.extract_ss_dict(calibration)
         self.update_with_hetinputs(ss)
@@ -176,70 +181,496 @@ class HetBlock(Block):
 
     '''Steady-state backward and forward methods'''
 
-    def backward_steady_state(self, ss, tol=1E-8, maxit=100000):
-        """Backward iteration to get steady-state policies and other outcomes"""
+    # def backward_steady_state(self, ss, tol=1E-8, maxit=100_000):
+    #     """Backward iteration to get steady-state policies and other outcomes"""
+    #     ss = ss.copy()
+    #     exog = self.make_exog_law_of_motion(ss)
+
+    #     old = {}
+    #     for it in range(maxit):
+    #         for k in self.backward:
+    #             ss[k + '_p'] = exog.expectation(ss[k])
+    #             del ss[k]
+
+    #         ss.update(self.backward_fun(ss))
+    #         if it % 10 == 1 and all(
+    #             utils.optimized_routines.within_tolerance(ss[k], old[k], tol)
+    #                                 for k in self.policy):
+    #             break
+
+    #         old.update({k: ss[k] for k in self.policy})
+    #     else:
+    #         warnings.warn(f"No convergence of policy functions after"
+    #                       f"{maxit}; [something about metric] ")
+    #         # raise ValueError(
+    #         #     f'No convergence of policy functions after {maxit}' + 
+    #         #     'backward iterations!'
+    #         #     )
+
+    #     for k in self.backward:
+    #         del ss[k + '_p']
+
+    #     return ss
+
+    # def backward_steady_state(self, ss, tol=1e-8, maxit=100_000,
+    #                         m_window=16, eta=1e-3, delta=1e-3):
+    #     """
+    #     Backward iteration to get steady-state policies and other outcomes.
+
+    #     Now collects per-policy diagnostics and warns only for the policies that
+    #     failed to converge by maxit.
+    #     """
+    #     ss = ss.copy()
+    #     exog = self.make_exog_law_of_motion(ss)
+
+    #     # ---- per-policy O(1) state ----
+    #     # For each policy key k, keep small scalar state.
+    #     pols = list(self.policy)  # OrderedSet -> list preserves order
+    #     state = {
+    #         k: {
+    #             "mask": 0, "count": 0, "e_min": float("inf"),
+    #             "stall": 0, "e_prev": float("inf"), "last_e": float("inf"),
+    #             "ever_converged": False,
+    #         } for k in pols
+    #     }
+
+    #     old = {}
+    #     for it in range(maxit):
+    #         for k in self.backward:
+    #             ss[k + "_p"] = exog.expectation(ss[k])
+    #             del ss[k]
+
+    #         ss.update(self.backward_fun(ss))
+
+    #         if it % 10 == 1:
+
+    #             # GLOBAL stop: require all policies to be within tol simultaneously
+    #             within_all = all(
+    #                 utils.optimized_routines.within_tolerance(ss[k], old[k], tol)
+    #                 for k in pols 
+    #             )
+    #             # Per-policy updates
+    #             for k in pols:
+    #                 if k in old:
+    #                     k_within = utils.optimized_routines.within_tolerance(
+    #                         ss[k], old[k], tol
+    #                         )
+    #                     if k_within:
+    #                         state[k]["ever_converged"] = True
+    #                     # diagnostics for this policy
+    #                     e_curr = utils.optimized_routines.max_abs_diff(
+    #                         ss[k], old[k]
+    #                         )
+    #                     st = state[k]
+    #                     st["last_e"] = e_curr
+    #                     if np.isfinite(st["e_prev"]):
+    #                         m, c = utils.optimized_routines.update_monotonicity(
+    #                             np.int64(st["mask"]), np.int64(st["count"]),
+    #                             np.int64(m_window),
+    #                             np.float64(st["e_prev"]), np.float64(e_curr),
+    #                             np.float64(eta)
+    #                         )
+    #                         st["mask"] = int(m)
+    #                         st["count"] = int(c)
+    #                         emin, stall = \
+    #                             utils.optimized_routines.update_stagnation(
+    #                             np.float64(st["e_min"]), np.int64(st["stall"]),
+    #                             np.float64(e_curr), np.float64(delta)
+    #                         )
+    #                         st["e_min"] = float(emin)
+    #                         st["stall"] = int(stall)
+    #                     else:
+    #                         st["e_min"] = min(st["e_min"], e_curr)
+    #                     st["e_prev"] = e_curr
+
+    #             if within_all:
+    #                 break
+
+    #             # snapshot current for next comparison
+    #             old.update({k: ss[k] for k in pols})
+    #         else:
+    #             old.update({k: ss[k] for k in pols})
+
+    #     else:
+    #         # No break → exceeded maxit. Build warning per policy that failed.
+    #         print(maxit)
+    #         metrics = {}
+    #         failed = []
+    #         for k in pols:
+    #             st = state[k]
+    #             M = (st["count"] / float(m_window)) if m_window > 0 else float("nan")
+    #             metrics[k] = PolicyDiagnostics(
+    #                 last_error=float(st["last_e"]),
+    #                 best_error=float(st["e_min"]),
+    #                 monotonicity_M=float(M),
+    #                 stall_count=int(st["stall"]),
+    #                 converged=bool(st["ever_converged"]),
+    #             )
+    #             if not st["ever_converged"]:
+    #                 failed.append(k)
+
+    #         # Only warn if at least one policy never met tol at any check
+    #         if failed:
+    #             warnings.warn(PolicyConvergenceWarning(
+    #                 phase="backward",
+    #                 maxit=maxit,
+    #                 tol=float(tol),
+    #                 failed_policies=tuple(failed),
+    #                 metrics=metrics,
+    #             ))
+    #         # else: all policies individually crossed tol at least once,
+    #         # but not together
+
+    #     for k in self.backward:
+    #         del ss[k + "_p"]
+
+    #     return ss
+
+    def backward_steady_state(self, ss, tol=1e-8, maxit=100_000,
+                            m_window=16, eta=1e-3, delta=1e-3):
+        """
+        Backward iteration to get steady-state policies and other outcomes.
+
+        Collects per-policy diagnostics and ALWAYS emits a PolicyConvergenceWarning
+        with metrics. On success, failed_policies=() so consumers can still record
+        M/last_error/stall but keep non_convergence=False.
+        """
         ss = ss.copy()
         exog = self.make_exog_law_of_motion(ss)
 
+        # Per-policy O(1) state
+        pols = list(self.policy)  # OrderedSet preserves order
+        state = {
+            k: {
+                "mask": 0, "count": 0, "e_min": float("inf"),
+                "stall": 0, "e_prev": float("inf"), "last_e": float("inf"),
+                "ever_converged": False,
+            } for k in pols
+        }
+
         old = {}
+        converged_overall = False  # tracks whether we hit the break condition
+
         for it in range(maxit):
+            # 1) move backward variables one step
             for k in self.backward:
-                ss[k + '_p'] = exog.expectation(ss[k])
+                ss[k + "_p"] = exog.expectation(ss[k])
                 del ss[k]
 
+            # 2) update policies
             ss.update(self.backward_fun(ss))
-            if it % 10 == 1 and all(
-                utils.optimized_routines.within_tolerance(ss[k], old[k], tol)
-                                    for k in self.policy):
-                break
 
-            old.update({k: ss[k] for k in self.policy})
-        else:
-            raise ValueError(f'No convergence of policy functions after {maxit} backward iterations!')
+            # 3) periodic convergence checks + diagnostics
+            if it % 10 == 1:
+                # global stop: all policies must be within tol simultaneously
+                within_all = all(
+                    utils.optimized_routines.within_tolerance(ss[k], old[k], tol)
+                    for k in pols
+                )
 
+                # per-policy diagnostics/update
+                for k in pols:
+                    if k in old:
+                        k_within = utils.optimized_routines.within_tolerance(ss[k], old[k], tol)
+                        if k_within:
+                            state[k]["ever_converged"] = True
+
+                        e_curr = utils.optimized_routines.max_abs_diff(ss[k], old[k])
+                        st = state[k]
+                        st["last_e"] = e_curr
+
+                        if np.isfinite(st["e_prev"]):
+                            m, c = utils.optimized_routines.update_monotonicity(
+                                np.int64(st["mask"]), np.int64(st["count"]),
+                                np.int64(m_window),
+                                np.float64(st["e_prev"]), np.float64(e_curr),
+                                np.float64(eta)
+                            )
+                            st["mask"] = int(m)
+                            st["count"] = int(c)
+
+                            emin, stall = utils.optimized_routines.update_stagnation(
+                                np.float64(st["e_min"]), np.int64(st["stall"]),
+                                np.float64(e_curr), np.float64(delta)
+                            )
+                            st["e_min"] = float(emin)
+                            st["stall"] = int(stall)
+                        else:
+                            st["e_min"] = min(st["e_min"], e_curr)
+
+                        st["e_prev"] = e_curr
+
+                if within_all:
+                    converged_overall = True
+                    # still snapshot old before exiting so metrics reflect latest check
+                    old.update({k: ss[k] for k in pols})
+                    break
+
+                # snapshot current for next comparison
+                old.update({k: ss[k] for k in pols})
+
+            else:
+                # keep 'old' in sync between checks
+                old.update({k: ss[k] for k in pols})
+
+        # ---- build & emit a structured message with metrics (success or failure) ----
+        metrics = {}
+        failed = []
+        for k in pols:
+            st = state[k]
+            M = (st["count"] / float(m_window)) if m_window > 0 else float("nan")
+            metrics[k] = PolicyDiagnostics(
+                last_error=float(st["last_e"]),
+                best_error=float(st["e_min"]),
+                monotonicity_M=float(M),
+                stall_count=int(st["stall"]),
+                converged=bool(st["ever_converged"]),
+            )
+            # treat a policy as "failed" only if we didn't converge overall AND it never hit tol
+            if not converged_overall and not st["ever_converged"]:
+                failed.append(k)
+
+        warnings.warn(PolicyConvergenceWarning(
+            phase="backward",
+            maxit=maxit,
+            tol=float(tol),
+            failed_policies=tuple(failed),   # empty on success
+            metrics=metrics,                 # always included
+            # if you added this field to the class; otherwise omit:
+            # converged_overall=bool(converged_overall),
+        ))
+
+        # cleanup
         for k in self.backward:
-            del ss[k + '_p']
+            del ss[k + "_p"]
 
         return ss
 
-    def forward_steady_state(self, ss, tol=1E-10, maxit=100_000):
-        """Forward iteration to get steady-state distribution"""
-        exog = self.make_exog_law_of_motion(ss)
-        endog = self.make_endog_law_of_motion(ss)
+
+    # def forward_steady_state(self, ss, tol=1E-10, maxit=100_000):
+    #     """Forward iteration to get steady-state distribution"""
+    #     exog = self.make_exog_law_of_motion(ss)
+    #     endog = self.make_endog_law_of_motion(ss)
         
+    #     Dbeg_seed = ss.get('Dbeg', None)
+    #     pi_seeds = [ss.get(k + '_seed', None) for k in self.exogenous]
+
+    #     # first obtain initial distribution D
+    #     if Dbeg_seed is None:
+    #         # stationary distribution of each exogenous
+    #         pis = [exog[i].stationary(pi_seed) for i, pi_seed in enumerate(pi_seeds)]
+
+    #         # uniform distribution over endogenous
+    #         endog_uniform = [np.full(len(ss[k+'_grid']), 1/len(ss[k+'_grid'])) for k in self.policy]
+
+    #         # initialize outer product of all these as guess
+    #         Dbeg = utils.multidim.outer(pis + endog_uniform)
+    #     else:
+    #         Dbeg = Dbeg_seed
+
+    #     # iterate until convergence by tol, or maxit
+    #     D = exog.forward(Dbeg)
+    #     for it in range(maxit):
+    #         Dbeg_new = endog.forward(D)
+    #         D_new = exog.forward(Dbeg_new)
+
+    #         # only check convergence every 10 iterations for efficiency
+    #         if it % 10 == 0 and utils.optimized_routines.within_tolerance(Dbeg, Dbeg_new, tol):
+    #             break
+    #         Dbeg = Dbeg_new
+    #         D = D_new
+    #     else:
+    #         raise ValueError(f'No convergence after {maxit} forward iterations!')
+
+    #     # "D" is after the exogenous shock, Dbeg is before it
+    #     return Dbeg, D
+    
+# from utilities.convergence import PolicyConvergenceWarning, PolicyDiagnostics  # as defined earlier
+
+    # def forward_steady_state(self, ss, tol=1e-10, maxit=100_000,
+    #                      m_window=16, eta=1e-3, delta=1e-3):
+    #     """Forward iteration to get steady-state distribution.
+
+    #     Emits PolicyConvergenceWarning(phase="forward") on non-convergence,
+    #     carrying diagnostics for the single 'distribution' policy.
+    #     """
+    #     exog  = self.make_exog_law_of_motion(ss)
+    #     endog = self.make_endog_law_of_motion(ss)
+
+    #     Dbeg_seed = ss.get('Dbeg', None)
+    #     pi_seeds  = [ss.get(k + '_seed', None) for k in self.exogenous]
+
+    #     if Dbeg_seed is None:
+    #         pis = [exog[i].stationary(pi_seed) for i, pi_seed in enumerate(pi_seeds)]
+    #         endog_uniform = [np.full(len(ss[k+'_grid']), 1/len(ss[k+'_grid'])) for k in self.policy]
+    #         Dbeg = utils.multidim.outer(pis + endog_uniform)
+    #     else:
+    #         Dbeg = Dbeg_seed
+
+    #     # --- O(1) convergence diagnostics for the distribution ---
+    #     mask = np.int64(0)            # bitmask of last m_window decreases
+    #     count = np.int64(0)           # 1-bit count in 'mask'
+    #     e_min = np.float64(np.inf)    # best (smallest) error so far
+    #     stall = np.int64(0)           # consecutive non-bests
+    #     e_prev = np.float64(np.inf)   # previous scalar error
+    #     last_e = np.float64(np.inf)   # last computed error (for reporting)
+    #     ever_converged = False        # whether Dbeg reached tol at any check
+
+    #     # iterate until convergence by tol, or maxit
+    #     D = exog.forward(Dbeg)
+    #     for it in range(maxit):
+    #         Dbeg_new = endog.forward(D)
+    #         D_new    = exog.forward(Dbeg_new)
+
+    #         if it % 10 == 0:
+    #             within = utils.optimized_routines.within_tolerance(Dbeg, Dbeg_new, tol)
+    #             if within:
+    #                 ever_converged = True
+    #                 break
+
+    #             # scalar error for diagnostics (max-norm)
+    #             e_curr = utils.optimized_routines.max_abs_diff(Dbeg, Dbeg_new)
+    #             last_e = e_curr
+
+    #             if np.isfinite(e_prev):
+    #                 # monotonicity bitmask
+    #                 mask, count = utils.optimized_routines.update_monotonicity(
+    #                     mask, count, np.int64(m_window),
+    #                     np.float64(e_prev), np.float64(e_curr), np.float64(eta)
+    #                 )
+    #                 # stagnation detector
+    #                 e_min, stall = utils.optimized_routines.update_stagnation(
+    #                     np.float64(e_min), np.int64(stall),
+    #                     np.float64(e_curr), np.float64(delta)
+    #                 )
+    #             else:
+    #                 e_min = min(e_min, e_curr)
+    #             e_prev = e_curr
+
+    #         # advance
+    #         Dbeg = Dbeg_new
+    #         D    = D_new
+    #     else:
+    #         # No break occurred -> max iterations exceeded
+    #         M = count / float(m_window) if m_window > 0 else float("nan")
+
+    #         # Build per-"policy" metrics dict with a single entry 'distribution'
+    #         metrics = {
+    #             "distribution": PolicyDiagnostics(
+    #                 last_error=float(last_e),
+    #                 best_error=float(e_min),
+    #                 monotonicity_M=float(M),
+    #                 stall_count=int(stall),
+    #                 converged=bool(ever_converged),
+    #             )
+    #         }
+    #         failed = tuple([] if ever_converged else ["distribution"])
+
+    #         warnings.warn(PolicyConvergenceWarning(
+    #             phase="forward",
+    #             maxit=maxit,
+    #             tol=float(tol),
+    #             failed_policies=failed,
+    #             metrics=metrics,
+    #         ))
+
+    #     # "D" is after the exogenous shock, Dbeg is before it
+    #     return Dbeg, D
+
+    def forward_steady_state(self, ss, tol=1e-10, maxit=100_000,
+                            m_window=16, eta=1e-3, delta=1e-3):
+        """
+        Forward iteration to get steady-state distribution.
+
+        Always emits PolicyConvergenceWarning(phase="forward") carrying diagnostics
+        for the single 'distribution' policy. On success, failed_policies=().
+        """
+        exog  = self.make_exog_law_of_motion(ss)
+        endog = self.make_endog_law_of_motion(ss)
+
         Dbeg_seed = ss.get('Dbeg', None)
-        pi_seeds = [ss.get(k + '_seed', None) for k in self.exogenous]
+        pi_seeds  = [ss.get(k + '_seed', None) for k in self.exogenous]
 
-        # first obtain initial distribution D
         if Dbeg_seed is None:
-            # stationary distribution of each exogenous
             pis = [exog[i].stationary(pi_seed) for i, pi_seed in enumerate(pi_seeds)]
-
-            # uniform distribution over endogenous
             endog_uniform = [np.full(len(ss[k+'_grid']), 1/len(ss[k+'_grid'])) for k in self.policy]
-
-            # initialize outer product of all these as guess
             Dbeg = utils.multidim.outer(pis + endog_uniform)
         else:
             Dbeg = Dbeg_seed
+
+        # ---- O(1) diagnostics for the distribution ----
+        mask  = np.int64(0)          # bitmask of last m_window decreases
+        count = np.int64(0)          # number of 1-bits in mask
+        e_min = np.float64(np.inf)   # best error so far
+        stall = np.int64(0)          # consecutive non-bests
+        e_prev = np.float64(np.inf)  # previous scalar error
+        last_e = np.float64(np.inf)  # last computed error (for reporting)
+        ever_converged = False       # whether Dbeg reached tol at any check
+        converged_overall = False
 
         # iterate until convergence by tol, or maxit
         D = exog.forward(Dbeg)
         for it in range(maxit):
             Dbeg_new = endog.forward(D)
-            D_new = exog.forward(Dbeg_new)
+            D_new    = exog.forward(Dbeg_new)
 
-            # only check convergence every 10 iterations for efficiency
-            if it % 10 == 0 and utils.optimized_routines.within_tolerance(Dbeg, Dbeg_new, tol):
-                break
-            Dbeg = Dbeg_new
-            D = D_new
-        else:
-            raise ValueError(f'No convergence after {maxit} forward iterations!')
+            if it % 10 == 0:
+                within = utils.optimized_routines.within_tolerance(Dbeg, Dbeg_new, tol)
+                if within:
+                    ever_converged = True
+                    converged_overall = True
+                    # we can break immediately; Dbeg/D already correspond to the last step
+                    # but advance one step so outputs align with the successful check if you prefer:
+                    # Dbeg, D = Dbeg_new, D_new
+                    break
+
+                # scalar error for diagnostics (max-norm)
+                e_curr = utils.optimized_routines.max_abs_diff(Dbeg, Dbeg_new)
+                last_e = e_curr
+
+                if np.isfinite(e_prev):
+                    # monotonicity bitmask
+                    mask, count = utils.optimized_routines.update_monotonicity(
+                        mask, count, np.int64(m_window),
+                        np.float64(e_prev), np.float64(e_curr), np.float64(eta)
+                    )
+                    # stagnation detector
+                    e_min, stall = utils.optimized_routines.update_stagnation(
+                        np.float64(e_min), np.int64(stall),
+                        np.float64(e_curr), np.float64(delta)
+                    )
+                else:
+                    e_min = min(e_min, e_curr)
+                e_prev = e_curr
+
+            # advance state
+            Dbeg, D = Dbeg_new, D_new
+
+        # ---- build & emit report (success or failure) ----
+        M = count / float(m_window) if m_window > 0 else float("nan")
+        metrics = {
+            "distribution": PolicyDiagnostics(
+                last_error=float(last_e),
+                best_error=float(e_min),
+                monotonicity_M=float(M),
+                stall_count=int(stall),
+                converged=bool(ever_converged),
+            )
+        }
+        failed = () if converged_overall else (("distribution",) if not ever_converged else ())
+
+        warnings.warn(PolicyConvergenceWarning(
+            phase="forward",
+            maxit=maxit,
+            tol=float(tol),
+            failed_policies=failed,
+            metrics=metrics,
+            # if your class has this field; otherwise omit it:
+            # converged_overall=bool(converged_overall),
+        ))
 
         # "D" is after the exogenous shock, Dbeg is before it
         return Dbeg, D
-
 
     '''Nonlinear impulse backward and forward methods'''
 

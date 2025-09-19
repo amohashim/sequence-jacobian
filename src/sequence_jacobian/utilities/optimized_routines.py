@@ -52,3 +52,55 @@ def fast_aggregate(X, Y):
     for t in range(T):
         Z[t] = Xnew[t, :] @ Ynew[t, :]
     return Z
+
+
+# ---------- extra functions for testing convergence ---------- #
+
+@njit
+def max_abs_diff(x1, x2):
+    """
+    from Chat
+    Return max(abs(x1-x2)) for arrays of same shape."""
+    y1 = x1.ravel()
+    y2 = x2.ravel()
+    md = 0.0
+    for i in range(y1.shape[0]):
+        d = abs(y1[i] - y2[i])
+        if d > md:
+            md = d
+    return md
+
+@njit
+def update_monotonicity(mask, count, m, e_prev, e_curr, eta):
+    """
+    from Chat
+    Bitmask over last m steps: new_bit=1 if e_curr < (1-eta)*e_prev.
+    Returns updated (mask, count). 'count' is popcount(mask) maintained in O(1).
+    """
+    # bit that will fall off when we shift (the MSB before shift)
+    msb = (mask >> (m - 1)) & 1
+    # did we improve by a meaningful relative margin?
+    improved = 1 if e_curr < (1.0 - eta) * e_prev else 0
+    # shift-in new bit; keep only m bits
+    mask = ((mask << 1) & ((1 << m) - 1)) | improved
+    # maintain running count without popcount()
+    count = count - msb + improved
+    return mask, count
+
+@njit
+def update_stagnation(e_min, stall, e_curr, delta):
+    """
+    from Chat
+    Track best-so-far error and a stall counter.
+    If e_curr < (1-delta)*e_min: new best → reset stall.
+    Else: increment stall.
+    """
+    if e_curr < (1.0 - delta) * e_min:
+        e_min = e_curr
+        stall = 0
+    else:
+        stall += 1
+    return e_min, stall
+
+
+
